@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meat Master AI</title>
+    <style>
+        body {
+            font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+            background: #0f0f0f;
+            color: white;
+            text-align: center;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            background: #1a1a1a;
+            padding: 30px;
+            border-radius: 30px;
+            display: inline-block;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.8);
+            border: 1px solid #333;
+            max-width: 90%;
+            width: 500px;
+            margin-top: 30px;
+        }
+        h1 { color: #ff4b4b; font-size: 2rem; margin-bottom: 10px; letter-spacing: -1px; }
+        .status-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            background: #333;
+            font-size: 0.9rem;
+            color: #aaa;
+            margin-bottom: 20px;
+        }
+        #video-container {
+            position: relative;
+            width: 100%;
+            border-radius: 20px;
+            overflow: hidden;
+            border: 5px solid #222;
+            background: #000;
+        }
+        #video { width: 100%; display: block; }
+        #result-area {
+            margin-top: 25px;
+            padding: 20px;
+            border-radius: 15px;
+            background: #252525;
+            border: 1px solid #333;
+            min-height: 80px;
+            transition: 0.3s;
+        }
+        #main-message { font-size: 1.6rem; font-weight: bold; color: #ffcd00; display: block; margin-bottom: 5px; }
+        #sub-info { font-size: 1rem; color: #888; display: block; margin-bottom: 4px; }
+        #tip-text { font-size: 0.9rem; color: #aaa; display: block; }
+        .controls { margin-top: 30px; }
+        button {
+            background: #ff4b4b;
+            color: white;
+            border: none;
+            padding: 18px 45px;
+            border-radius: 15px;
+            cursor: pointer;
+            font-size: 1.2rem;
+            font-weight: bold;
+            transition: 0.3s;
+            box-shadow: 0 5px 15px rgba(255, 75, 75, 0.3);
+        }
+        button:hover { background: #ff3333; transform: translateY(-3px); }
+        button:active { transform: translateY(0); }
+        button.stop { background: #444; box-shadow: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🥩 MEAT MASTER AI</h1>
+        <div class="status-badge" id="server-status">서버 연결 대기 중...</div>
+
+        <div id="video-container">
+            <video id="video" autoplay playsinline></video>
+        </div>
+
+        <div id="result-area">
+            <span id="main-message">준비 완료</span>
+            <span id="sub-info">판독 시작 버튼을 눌러주세요</span>
+            <span id="tip-text"></span>
+        </div>
+
+        <div class="controls">
+            <button id="startBtn" onclick="toggleAutoPredict()">실시간 판독 시작 🎥</button>
+        </div>
+    </div>
+
+    <script>
+        // ====================================================
+        // ⭐ 여기만 수정하면 됩니다!
+        //    - 로컬 테스트할 때:  http://127.0.0.1:5001
+        //    - Render 배포 후:    https://여러분의앱이름.onrender.com
+        // ====================================================
+        const API_URL = "https://donenescheckai.onrender.com";
+
+        const video = document.getElementById('video');
+        const mainMsg = document.getElementById('main-message');
+        const subInfo = document.getElementById('sub-info');
+        const tipText = document.getElementById('tip-text');
+        const startBtn = document.getElementById('startBtn');
+        const serverStatus = document.getElementById('server-status');
+
+        let isRunning = false;
+        let isWaiting = false; // 요청이 진행 중일 때 중복 전송 방지
+        let timerId = null;
+
+        // 1. 카메라 시작
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+            .then(stream => {
+                video.srcObject = stream;
+                serverStatus.innerText = "📷 카메라 연결됨";
+            })
+            .catch(err => {
+                alert("카메라를 켤 수 없습니다! 권한을 확인해주세요.");
+                serverStatus.innerText = "❌ 카메라 에러";
+            });
+
+        // 2. 판독 시작/중지 토글
+        function toggleAutoPredict() {
+            if (isRunning) {
+                stopPredict();
+            } else {
+                startPredict();
+            }
+        }
+
+        function startPredict() {
+            isRunning = true;
+            startBtn.innerText = "판독 중지 ⏹️";
+            startBtn.classList.add('stop');
+            // 1.5초마다 자동 판독 (너무 빠르면 요청이 쌓일 수 있어서 1.5초로 설정)
+            timerId = setInterval(captureAndPredict, 1500);
+        }
+
+        function stopPredict() {
+            isRunning = false;
+            startBtn.innerText = "실시간 판독 시작 🎥";
+            startBtn.classList.remove('stop');
+            clearInterval(timerId);
+            mainMsg.innerText = "판독 중지됨";
+            subInfo.innerText = "다시 시작하려면 버튼을 누르세요";
+            tipText.innerText = "";
+        }
+
+        // 3. 사진 캡처 → 서버 전송 → 결과 표시
+        async function captureAndPredict() {
+            // 이미 요청 중이면 건너뜀 (중복 전송 방지)
+            if (isWaiting) return;
+            isWaiting = true;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+
+            canvas.toBlob(async (blob) => {
+                const formData = new FormData();
+                formData.append('file', blob, 'capture.jpg');
+
+                try {
+                    const response = await fetch(`${API_URL}/predict`, {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (!response.ok) throw new Error(`서버 오류: ${response.status}`);
+
+                    const data = await response.json();
+
+                    // 결과 화면 업데이트
+                    mainMsg.innerText = data.message;
+                    subInfo.innerText = `확신도: ${data.confidence}% | 상태: ${data.class}`;
+                    tipText.innerText = data.tip || "";
+                    serverStatus.innerText = "🟢 서버 통신 중";
+                    serverStatus.style.color = "#4caf50";
+
+                } catch (error) {
+                    serverStatus.innerText = "🔴 서버 연결 끊김";
+                    serverStatus.style.color = "#ff4b4b";
+                    mainMsg.innerText = "연결 에러";
+                    subInfo.innerText = "서버(server.py)가 켜져 있는지 확인하세요!";
+                    tipText.innerText = `오류: ${error.message}`;
+                } finally {
+                    isWaiting = false; // 요청 완료 후 다음 요청 허용
+                }
+            }, 'image/jpeg');
+        }
+    </script>
+</body>
+</html>
